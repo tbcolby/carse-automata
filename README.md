@@ -221,10 +221,49 @@ log = "0.4.14"
 
 ## Screenshots
 
-*Captured via headless Renode emulation on macOS ARM64.*
+*Captured via headless Renode emulation on macOS ARM64. The Precursor display is 336x536 pixels, 1-bit monochrome.*
 
-> Screenshots will be added after the first Renode capture run.
-> Use: `python3 scripts/renode_capture.py --app carse --screenshots screenshots/`
+### Initial Grid (Epoch 0, Tick 0)
+
+The first epoch seeds with rule seed `0xBEEF`. Touch-biased random seeding scatters cells across all seven energy states. The cursor blinks at (32,32). Energy: 1,150.
+
+![Initial grid](screenshots/01_initial.png)
+
+### Cursor Movement
+
+Arrow keys move the cursor across the toroidal grid. The status bar tracks position and cell state.
+
+![Cursor moved](screenshots/02_cursor_moved.png)
+
+### Touching Cells
+
+Spacebar tap perturbs the cell under the cursor and increments its permanent touch count. Void becomes Dormant; low-energy cells gain +1; Burning collapses to Neutral.
+
+![Touched cells](screenshots/03_touched_cells.png)
+
+### Simulation Running (Tick 16)
+
+Holding spacebar flows time at ~10 ticks/second. The hidden rules drive state transitions. Energy dropped from 1,150 to 447 — most cells decayed, but clusters formed.
+
+![Simulation running](screenshots/04_simulation_running.png)
+
+### Emergent Structure (Tick 67)
+
+The simulation produces structure that cannot be predicted without running it — Wolfram's computational irreducibility made visible. A near-perfect ellipse of void surrounds a dense multi-state nucleus. Energy: 6,049.
+
+![Simulation evolved](screenshots/06_simulation_later.png)
+
+### Energy Cascade (Tick 111)
+
+Energy exploded to 15,068. Void channels carve through dense burning regions. The topology of the toroidal grid becomes visible as patterns wrap across edges.
+
+![Toward death](screenshots/08_toward_death.png)
+
+### Final State (Tick 154)
+
+Energy: 16,714. The grid has reached a complex high-energy state. Whether this epoch dies of collapse or continues is determined by the hidden threshold — the player cannot know until it happens.
+
+![Final state](screenshots/10_final.png)
 
 ---
 

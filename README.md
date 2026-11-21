@@ -86,9 +86,12 @@ Why seven? *"And on the seventh state, it rested."*
 | Arrow keys | Move cursor |
 | Spacebar (tap) | Touch cell: perturb state, increment permanent touch count |
 | Spacebar (hold) | Time flows at ~10 ticks/second |
-| Space + Left/Right | Scrub through fossil record of past epochs |
+| Space + Left/Right | Scrub through fossil record of past epochs (release space to return) |
+| Backspace / F4 | Save and return to the Precursor menu |
 
-No menus. No modes. No settings.
+No menus. No modes. No settings. The `∴` menu key is handled by the OS; apps never receive it.
+
+A tap that turns out to be the start of a hold is not counted as a touch: the touch is undone when the first repeat arrives.
 
 ### Hidden Rules
 
@@ -104,7 +107,7 @@ An epoch is one continuous run from seed to death. Death comes in three forms:
 
 - **Heat Death**: Total energy reaches zero. The universe is cold.
 - **Stagnation**: The grid enters a static state or period-2 oscillation. Nothing new can happen.
-- **Collapse**: Total energy exceeds a threshold. Everything burns out at once.
+- **Collapse**: Total energy exceeds a seed-derived threshold (9,000 to 20,000; the grid maximum is 24,576). Everything burns out at once. (0.1's threshold was above the grid maximum, so this death never happened.)
 
 When an epoch dies, a fossil record is saved and a new epoch begins. The Touch Map carries forward — cells you've attended to in past epochs are more likely to start alive in future ones.
 
@@ -118,7 +121,7 @@ When a new epoch seeds, cells with higher touch counts are biased toward higher 
 
 ### Drift
 
-If more than 24 hours pass between sessions, the simulation applies *drift* — slight random perturbation to the current state, as if the world dreamed while you were away.
+If more than 24 hours of wall-clock time pass between sessions, the simulation applies *drift* — a few cells shift by one state, as if the world dreamed while you were away. The last-session time is the real-time clock (not uptime), so this needs the device clock to have been set; if it was never set, drift is skipped.
 
 ### Easter Eggs
 
@@ -129,99 +132,71 @@ There are four. One is visible in the source. Three require play to discover.
 ## Technical Architecture
 
 ```
-apps/carse/
-├── Cargo.toml       # Dependencies: xous, gam, trng, pddb, ticktimer
+carse-automata/
+├── Cargo.toml          # app crate (package "carse"): gam, precursor-appkit, carse-core
+├── manifest-fragment.json
+├── capture.py          # Renode capture sequence (not yet run)
+├── core/               # carse-core: pure logic, no Xous dependencies, host tests
+│   └── src/{grid,rules,sim,seed,codec,input,draw}.rs
 └── src/
-    ├── main.rs      # Entry point, pump thread, event loop
-    ├── app.rs       # Game state, rendering, input, simulation
-    ├── grid.rs      # 64x64 toroidal grid, neighbors, seeding
-    ├── rules.rs     # Hidden rule system, seed-derived thresholds
-    └── storage.rs   # PDDB persistence, RLE compression, fossils
+    ├── main.rs         # registration, pump, message routing
+    └── app.rs          # keys -> core, persistence, drawing
 ```
 
 ### Design Decisions
 
-**Framebuffer UX** (`UxType::Framebuffer`): Raw pixel control, following the ball app pattern. No text chrome, no managed widgets — just rectangles on a canvas.
+**Framebuffer UX** (`UxType::Framebuffer`): raw pixel control, following the ball app pattern.
 
-**Pump thread pattern**: A dedicated thread sends blocking scalar messages to the main loop at 100ms intervals (10 ticks/sec). The main loop acknowledges each pump, providing natural backpressure. Copied directly from the ball app — this is the canonical Xous animation pattern.
+**Pump and time**: a pump thread ticks every 100 ms while the app is in the foreground and stops on Background. How many generations run is computed from ticktimer deltas (`input::Pacer`), so a late tick makes up the time instead of slowing the simulation down (0.1 ran one generation per pump message). Catch-up is capped at three generations per tick after a stall.
 
-**Diff rendering**: A full grid redraw pushes up to 4,096 cells x 2 rectangles each through the GAM. Diff rendering only redraws changed cells, batched into `GamObjectList` calls (32 items max per batch). Full redraws happen only on focus change and epoch start.
+**Diff rendering**: the shell keeps a "last drawn" grid and redraws only cells that differ from it (so touching a cell back to an earlier value redraws correctly), plus the old and new cursor cells. Cells are batched through `Screen::fill_rects`. GAM rectangles are inclusive at the bottom-right, so a 5 px cell spans offsets 0..=4 (0.1 drew 6x6 and erased its neighbours' edges).
 
-**RLE compression for fossils**: Fossil records store the final grid state of each epoch. Since grids tend to have spatial locality (runs of same-state cells), run-length encoding compresses the 4,096-byte grid to typically 500-2,000 bytes. The circular buffer holds the last 100 epochs.
+**Saving only when something changed**: the epoch is written every 50 generations while running, and on background/leave if dirty. Pausing, scrubbing and moving the cursor write nothing. (0.1 re-wrote 4 KB and synced ten times a second while paused on a multiple of 50.)
 
-**Hidden rules via seed-derived thresholds**: Rather than encoding complex lookup tables, the rule system derives numeric thresholds from the seed using a multiplicative hash. This produces varied but deterministic behavior across epochs — some seeds create rich emergence, others produce rapid collapse.
+**Validated records**: every record has a `CRS` magic, kind and version byte and is validated on read (lengths, cell states 0..=6, RLE length). 0.1 records are still read and rewritten in the new format. Unreadable or newer-version records put the app in read-only mode so they are never overwritten.
+
+**Hidden rules via seed-derived thresholds**: numeric thresholds derived from the seed with a multiplicative hash; the seed advances each epoch.
+
+**Randomness**: one TRNG draw per seeding seeds a local generator; TRNG failure is an error (no epoch starts, no touch is applied), never a constant.
 
 ### PDDB Storage Layout
 
+Dictionary `carse.data`:
+
 | Key | Size | Persistence |
 |-----|------|-------------|
-| `touchmap` | 16 KB (4096 x u32) | Forever |
-| `epoch.current` | ~4.1 KB (header + grid) | Per session |
-| `epoch.meta` | 12 bytes | Forever |
-| `fossil.{0-99}` | ~0.5-2 KB each (RLE) | Circular |
+| `touchmap` | 16 KB + 5 (4096 x u32) | Forever |
+| `epoch.current` | 4.1 KB (header + grid) | While running, on background/leave |
+| `epoch.meta` | 13 bytes (wall-clock ms of last save) | Refreshed at most hourly |
+| `fossil.{0-99}` | ~0.5-2 KB each (RLE, length-prefixed) | Ring of 100 epochs |
 
-Total footprint: ~120 KB base + fossil growth.
+Records are replaced by delete + rewrite (PDDB keys don't shrink on a shorter write). The store reloads when the set of open PDDB bases changes.
+
+### Limitations
+
+- Not run on Renode or hardware yet: `capture.py` is written but unrun, and the screenshots below were taken from the 0.1 build.
+- Fossil browsing loads one record per step and shows "No record" for recycled or never-saved epochs.
+- The status line uses small fixed text at the grid's foot; the 64x64 grid at 5 px (320 px) fills the canvas width.
 
 ---
 
 ## Building
 
-Carse Automata is a Xous app. It builds as part of the [xous-core](https://github.com/betrusted-io/xous-core) workspace.
+Carse Automata is a Xous app built inside an xous-core tree by [xous-dev-toolkit](https://github.com/tbcolby/xous-dev-toolkit):
 
-### Integration
-
-1. Copy `src/` and `Cargo.toml` to `xous-core/apps/carse/`
-
-2. Add to workspace `Cargo.toml`:
-   ```toml
-   "apps/carse",
-   ```
-
-3. Add to `apps/manifest.json`:
-   ```json
-   "carse": {
-       "context_name": "Carse Automata",
-       "menu_name": {
-           "appmenu.carse": {
-               "en": "Carse Automata",
-               "en-tts": "Carse Automata"
-           }
-       }
-   }
-   ```
-
-4. Build for Renode emulator:
-   ```bash
-   cargo xtask renode-image carse
-   ```
-
-5. Build for hardware:
-   ```bash
-   cargo xtask app-image carse
-   ```
-
-### Dependencies
-
-```toml
-[dependencies]
-xous = "0.9.69"
-xous-ipc = "0.10.9"
-gam = { path = "../../services/gam" }
-trng = { path = "../../services/trng" }
-pddb = { path = "../../services/pddb" }
-ticktimer-server = { package = "xous-api-ticktimer", version = "0.9.68" }
-log-server = { package = "xous-api-log", version = "0.1.68" }
-xous-names = { package = "xous-api-names", version = "0.9.70" }
-num-derive = { version = "0.4.2", default-features = false }
-num-traits = { version = "0.2.14", default-features = false }
-log = "0.4.14"
+```bash
+cd xous-dev-toolkit
+bin/integrate --xous-root <xous-core> --grade <path to this repo>
+cd core && cargo test      # 46 host tests, no Xous needed
 ```
+
+Manual integration: copy the repo to `xous-core/apps/carse/` (the `core/` crate with it), add `"apps/carse"` to workspace `members`, and merge `manifest-fragment.json` into `apps/manifest.json`. The manifest key must equal the package name (`carse`), because the GAM app name is `gam::APP_NAME_CARSE`.
 
 ---
 
 ## Screenshots
 
-*Captured via headless Renode emulation on macOS ARM64. The Precursor display is 336x536 pixels, 1-bit monochrome.*
+*Captured via headless Renode emulation on macOS ARM64 from the 0.1 build (before the cell-size, cursor and diff fixes). The Precursor display is 336x536 pixels, 1-bit monochrome. A Renode capture of the current build has not been run yet.*
 
 ### Initial Grid (Epoch 0, Tick 0)
 
@@ -293,7 +268,7 @@ Carse Automata has only one answer:
 **Press spacebar.**
 
 ```
-CARSE AUTOMATA v0.1
+CARSE AUTOMATA v0.2
 Designed by Tyler Colby & Claude
 For the Precursor Platform
 2026

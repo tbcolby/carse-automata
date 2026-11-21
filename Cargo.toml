@@ -1,23 +1,24 @@
 [package]
 name = "carse"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Tyler Colby"]
 edition = "2021"
-description = "Carse Automata — a cellular automaton sandbox for Precursor"
+description = "Carse Automata: a cellular automaton sandbox for Precursor"
+license = "Apache-2.0"
 
-# Dependency versions enforced by Cargo.lock.
+# Lives at xous-core/apps/carse/ (see xous-dev-toolkit/bin/integrate).
 [dependencies]
 log = "0.4.14"
 num-derive = { version = "0.4.2", default-features = false }
 num-traits = { version = "0.2.14", default-features = false }
-xous = "0.9.69"
-xous-ipc = "0.10.9"
-log-server = { package = "xous-api-log", version = "0.1.68" }
-ticktimer-server = { package = "xous-api-ticktimer", version = "0.9.68" }
-xous-names = { package = "xous-api-names", version = "0.9.70" }
+xous = "0.9.71"
+log-server = { package = "xous-api-log", version = "0.1.70" }
+xous-names = { package = "xous-api-names", version = "0.9.72" }
+ticktimer-server = { package = "xous-api-ticktimer", version = "0.9.71" }
 gam = { path = "../../services/gam" }
-trng = { path = "../../services/trng" }
-pddb = { path = "../../services/pddb" }
+llio = { path = "../../services/llio" }
+precursor-appkit = { path = "../../libs/precursor-appkit" }
+carse-core = { path = "core" }
 
 [features]
 default = []

@@ -1,0 +1,14 @@
+{
+    "carse": {
+        "context_name": "Carse Automata",
+        "menu_name": {
+            "appmenu.carse": {
+                "en": "Carse Automata",
+                "en-tts": "Carse Automata",
+                "fr": "Carse Automata",
+                "ja": "Carse Automata",
+                "zh": "Carse Automata"
+            }
+        }
+    }
+}
